@@ -3,9 +3,6 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
 
 ```{r setup, message = FALSE}
 library(Quandl)
@@ -16,7 +13,7 @@ library(forecast)
 library(dygraphs)
 ```
 
-```{r, fig.width = 9.5}
+```{r, include = TRUE, fig.width = 9.5}
 ten_year_breakeven <- Quandl("FRED/T10YIE", type = "xts", collapse = "daily",  
                     start_date="2015-11-01", end_date="2016-12-31")
 
@@ -39,11 +36,10 @@ dygraph(combined) %>% #dySeries("ten_year_breakeven") %>% dySeries("Cash.Buyer")
  
 
 
-```{r, fig.width = 9.5}
+```{r, include = TRUE, fig.width = 9.5}
 
 copper <- Quandl("CHRIS/CME_HG1", type = "xts", collapse = "daily",  
                     start_date="2012-01-01", end_date="2016-12-31")
-copper$price <- copper$Settle * 100
 
 gold <- Quandl("CHRIS/CME_GC1", type = "xts", collapse = "daily",  
                     start_date="2012-01-01", end_date="2016-12-31")
@@ -51,7 +47,6 @@ gold <- Quandl("CHRIS/CME_GC1", type = "xts", collapse = "daily",
 ten_year <- Quandl("FRED/DGS10", type = "xts", collapse = "daily",  
                     start_date="2012-01-01", end_date="2016-12-31")
 
-ratio <- merge(copper$Price, gold$Settle)
 ratio <- window(na.locf(merge(copper$Settle, gold$Settle, ten_year), formLast = TRUE), index(copper))
 colnames(ratio) <- c("Copper", "Gold", "TenYear")
 ratio$ratio <- (ratio$Copper*100)/ratio$Gold
