@@ -13,52 +13,147 @@ library(forecast)
 library(dygraphs)
 ```
 
-```{r, include = TRUE, fig.width = 9.5}
+Roses are <span style="color:red">red</span>
+
+violets are <span style="color:blue">blue</span>
+
+Today we will continue getting familiar with data from Quandl but we will also devote some time to dygraphs aesthetics. For substance, today we will examine a few interesting charts that caught my attention in a recent David Gundlach presentation. The first is the relationship between Copper prices and the breakeven inflation rate, and the second is the the relationship between the gold/copper price and 10-year treasury yields. Devotees will remember that we examined and charted sector correlations back in January and we'll thank ourselves for making that work reproducible today - since we can recycle a function that calculates time series correlations and stores them in an easily dygraphable xts object. 
+
+We have three main objectives: 
+1) continue getting familiar with Quandl by exploring several more datasets (gold, copper (from two sources), 10 year breakeven, 10 year yields), and then working with those data sets together. We'll see that Quandl makes it easy to pull data from disparate sources but work with them. 
+2) examine two interesting hypotheses involving copper prices - full disclosure: coppe might
+3) Expand out dygraphs toolkit a bit and focus on building up a data visualization in discrete pieces. This isn't very efficient, but it will make things easy when move this into production as a Shiny app. 
+
+Why do we care about the copper-gold price ratio and Treasury yields? First, both Jeff Gundlach (in [this webcast](http://doubleline.com/latest-webcasts/)) and [Adam Robinson](http://robinsonglobalstrategies.com/), say so, and that's probably good enough to at least give the idea a second look.  But the substantive idea goes like this. Copper is a useful industrial metal whose price tends to rise when the global economy expands. As firms produce more goods that require copper as an input, the increased demand for copper drives the price up. Gold, on the other hand, is somewhat less useful metal whose prices tends to rise when investors are fearful about a contracting global economy. Gold is a safe-haven investment and a rising gold price signals either a contracting economy, investor fears of a contracting economy or both. Thus, the copper-gold price ratio tends to be increasing when the economy is expanding. 
+
+The yield on 10-year Treasury Notes also tends to be rising during economic expansion because investors' inflation expectations will also be on the rise. As investors' expect inflation to rise, they anticipate a rise in intererst rates (for those of you who are too young to remember what an interest rate is, take a look at Treasury yields in the 1980s) and start to seek higher yields today.  That can drive down Treasury prices and increas yields.
+
+There's nothing too crazy here but the key is that the copper-gold ratio is a reliable signal about global growth and the 10-year yeild is a reliable signal about inflation expectations - so we'll investigate the relationship between those two time series. 
+
+```{r}
 ten_year_breakeven <- Quandl("FRED/T10YIE", type = "xts", collapse = "daily",  
                     start_date="2015-11-01", end_date="2016-12-31")
 
 copper <- Quandl("LME/PR_CU", type = "xts", collapse = "daily",  
                     start_date="2015-11-01", end_date="2016-12-31")
 
-gold <- Quandl("CHRIS/CME_GC1", type = "xts", collapse = "daily",  
-                    start_date="2015-11-01", end_date="2016-12-31")
+copper_breakeven <- merge.xts(ten_year_breakeven, copper$`Cash Buyer`)
+```
 
-combined <- merge.xts(ten_year_breakeven, copper$`Cash Buyer`)
 
-dygraph(combined) %>% #dySeries("ten_year_breakeven") %>% dySeries("Cash.Buyer")
+```{r}
+dygraph(copper_breakeven) %>% 
+  #dyRoller(rollPeriod = 3) %>% 
+  #dyAxis("y", label = "Percent (%)") %>%
+  #dyAxis("y2", label = "USD", independentTicks = TRUE) %>%
+  dySeries("ten_year_breakeven") %>% 
+  dySeries("Cash.Buyer") %>% 
+  #dyEvent("2016-11-07", label = "Trump!", color = "black", labelLoc = "bottom")
+
+```
+ Let's have a look with and without dyRollPeriod(). 
+
+Let's look at with roll period and without, in fact, let's build this up piece by piece with left hand side and right hand side. We're going to focus on dygraphing tools  abit
+
+```{r, fig.width = 9.5}
+dygraph(copper_breakeven) %>% 
   dyRoller(rollPeriod = 3) %>% 
   dyAxis("y", label = "Percent (%)") %>%
   dyAxis("y2", label = "USD", independentTicks = TRUE) %>%
   dySeries("ten_year_breakeven", axis = 'y', label = "10 Year US Breakeven (LHS)") %>% 
-  dySeries("Cash.Buyer", axis = 'y2', label = "Copper Spot Price (RHS)")
-
+  dySeries("Cash.Buyer", axis = 'y2', label = "Copper Spot Price (RHS)") %>% 
+  dyEvent("2016-11-07", label = "Trump!", color = "black", labelLoc = "bottom")
 ```
- 
 
+First let's import our data from Quandl. We will specify type = "xts" in order to create xts objects and collapse = "daily" because we want daily prices. Note in particular our data sources: CME for copper and gold and FRED for the 10-year yield. But, we just need the Quandl codes and to be careful about consistent start/end dates for each data set. It's a liberating feeling to know before starting a project that we'll be able to find whatever data we need in one source. 
+
+Let's get to the importing.
 
 ```{r, include = TRUE, fig.width = 9.5}
 
 copper <- Quandl("CHRIS/CME_HG1", type = "xts", collapse = "daily",  
-                    start_date="2012-01-01", end_date="2016-12-31")
+                    start_date="2012-01-01", end_date="2017-03-31")
 
 gold <- Quandl("CHRIS/CME_GC1", type = "xts", collapse = "daily",  
-                    start_date="2012-01-01", end_date="2016-12-31")
+                    start_date="2012-01-01", end_date="2017-03-31")
 
 ten_year <- Quandl("FRED/DGS10", type = "xts", collapse = "daily",  
-                    start_date="2012-01-01", end_date="2016-12-31")
+                    start_date="2012-01-01", end_date="2017-03-31")
+```
 
-ratio <- window(na.locf(merge(copper$Settle, gold$Settle, ten_year), formLast = TRUE), index(copper))
-colnames(ratio) <- c("Copper", "Gold", "TenYear")
-ratio$ratio <- (ratio$Copper*100)/ratio$Gold
-ratio <- merge(ratio$ratio, ratio$TenYear)
+Now we want to combine these into one xts object, which normally would be an easy invocation of merge.xts, but there's a slight wrinkle. After creating one xts object, we know we need to calculate a ratio of copper/gold. That means that the presence of NAs will be a problem (I found this out the old fashioned way, by running code that threw an error). Let's take care of that by prepending the na.locf() function to our merge operation. That function will replace all NAs with the previous day's value. Why might one of our time series have an NA when another doesn't? Maybe one of the instruments has a trading holiday, or FRED publishes data for days that are general market holidays. 
 
-dygraph(ratio) %>% 
+The downside, of course, is that we are adding observed values that are fictional. I can live with that here since we're creating a visualization to help understand and gain an intuition about the hypothesized copper-gold-yield relationship. If we were using this data to create a trading strategy or algorithm, our NA replacement would be unacceptably fuzzy and a more rigorous decision making process would be needed synchronizing the data sets. No matter which approach is taken, the most crucial thing is to explain and make easily reproducible whatever process is used for handling NAs or any data cleaning such as this. Your colleagues, future self, clients and research audience can EVALUATE it accordingly.  
+
+To the code.
+```{r}
+# We're going to merge our 3 xts objects into on xts objects. That would normally be
+# very simple with merge.xts but we want to eliminat NAs with na.locf().
+#copper_gold_tenYear_merged <- window(na.locf(merge.xts(copper$Settle, gold$Settle, ten_yea), 
+ #                                            formLast = TRUE),index(copper))
+
+copper_gold_tenYear_merged <- na.locf(merge.xts(copper$Settle, gold$Settle, ten_year),
+                                      formLast = TRUE)
+
+colnames(copper_gold_tenYear_merged ) <- c("Copper", "Gold", "TenYear")
+```
+
+Now we create a new column to store the ratio of copper gold prices. 
+
+```{r}
+# Create the ratio of prices. I multiply copper by 100 to synch with the scale used by 
+# Gundlach in his presentation.
+copper_gold_tenYear_merged$ratio <- (copper_gold_tenYear_merged$Copper*100)/copper_gold_tenYear_merged$Gold
+```
+
+We now have an xts object that holds 4 time series, but I want to chart only the copper-gold price ratio and 10-year yields. To be super clear, I am going to create a new xts object to hold only those two time series.
+
+```{r}
+tenYear_ratio  <- merge(copper_gold_tenYear_merged$ratio, copper_gold_tenYear_merged$TenYear)
+```
+
+```{r}
+dygraph(tenYear_ratio) %>%
+  dySeries("ratio") %>% 
+  dySeries("TenYear")
+```
+That chart looks pretty good and it seems to support the hypothesis that these two time series are positively related.
+
+```{r}
+dygraph(tenYear_ratio) %>% 
   dyRoller(rollPeriod = 3) %>% 
   dyAxis("y", label = "Percent (%)") %>%
   dyAxis("y2", label = "USD", independentTicks = TRUE) %>%
   dySeries("ratio", axis = 'y', label = "Copper/Gold (LHS)") %>% 
-  dySeries("TenYear", axis = 'y2', label = "10 Year (RHS)")
+  dySeries("TenYear", axis = 'y2', label = "10 Year % Yield (RHS)")
 ```
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+```{r}
+# Calculate the rolling correlation between a sector ETF and the SPY SP500 ETF. 
+
+rolling_cor <- rollapply(copper_gold_tenYear_merged, 90, 
+                                       function(x) cor(x[, 1], x[, 2], use = "pairwise.complete.obs"), 
+                                       by.column = FALSE)
+
+names(rolling_cor) <- "Copper/Gold 10-year Correlation"
+
+dygraph(rolling_cor, main = "Rolling 90-day Correlation Copper-Gold & 10 Year Yield")
+
+```
+
+We'll add the minimum, maximum and mean rolling correlations.
+
+```{r}
+ 
+  avg <- round(mean(rolling_cor,  na.rm=T), 2)
+
+  mini <- round(min(rolling_cor,  na.rm=T), 2)
+ 
+  maxi <- round(max(rolling_cor,  na.rm=T), 2)
+  
+dygraph(rolling_cor, main = "Rolling 90-day correlations Copper-Gold & 10 Year Yield") %>% 
+  dyLimit(avg, color = 'black') %>% 
+  dyLimit(mini, color = 'red') %>% 
+  dyLimit(maxi, color = 'blue')
+```
+
