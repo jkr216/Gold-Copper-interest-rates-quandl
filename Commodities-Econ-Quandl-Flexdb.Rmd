@@ -1,0 +1,148 @@
+---
+title: "Copper Gold Flexdb"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    #vertical_layout: scroll
+    orientation: rows
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(tidyverse) 
+library(Quandl)
+library(xts)
+library(forecast)
+library(dygraphs)
+```
+
+Inputs{.sidebar}
+--------------------------------
+
+```{r}
+# Notice a tradeoff here: we're making it easy on our users because they don't need to 
+# remember the naming conventions. But, we're also forced to severely limit their choices. 
+# On page two, we'll see what it looks like to be more flexible but less efficient.
+
+commodityChoices <- c(
+                  "Copper" = "CHRIS/CME_HG1",
+                  "WTI oil" = "FRED/DCOILWTICO",# 
+                  "Iron Ore" = "ODA/PIORECR_USD", # monthly
+                  "Platinum" = "LPPM/PLAT", 
+                  "Palladium" = "LPPM/PALL",
+                  "Silver" = "LBMA/SILVER") 
+
+selectInput("commodity",
+            "Commodity",
+            choices = commodityChoices, 
+            selected = "Copper")
+
+econIndicatorChoices <- c(
+                  "10-Yr Yield" = "FRED/DGS10", # daily
+                  "US CPI" = "RATEINF/INFLATION_USA",# monthly
+                  "Japan CPI" = "RATEINF/INFLATION_JPN",
+                  "EU CPI" = "RATEINF/INFLATION_EUR") 
+
+selectInput("econIndicator",
+            "Economic Indicator",
+            choices = econIndicatorChoices, 
+            selected = "10-yr Yield")
+ 
+ 
+ 
+#frequencyChoices <- c("days" = "daily",
+ #                     "weeks" = "weekly", 
+  #                    "months" = "monthly")
+                     
+#selectInput("frequency",
+ #           "freq",
+  #          choices = frequencyChoices, 
+   #         selected = "months")
+
+                     
+
+dateRangeInput("dateRange",
+               "Date range",
+               start = "1990-01-01",
+               end   = "2016-12-31")
+
+ratio_indicator <- reactive({
+
+Quandl.api_key("d9EidiiDWoFESfdk5nPy")
+
+start_date <- format(input$dateRange[1])
+end_date <- format(input$dateRange[2])
+    
+commodity1 <- Quandl(input$commodity,
+               start_date = start_date,
+               end_date = end_date,
+               order = "asc",
+               type = "xts")
+
+gold <- Quandl("CHRIS/CME_GC1",
+               start_date = format(input$dateRange[1]),
+               end_date = format(input$dateRange[2]), 
+               order = "asc",
+               type = "xts")
+
+econIndicator <- Quandl(input$econIndicator,
+               start_date = format(input$dateRange[1]),
+               end_date = format(input$dateRange[2]),
+               order = "asc",
+               type = "xts")
+
+
+data_merged <- na.locf(merge.xts(commodity1[,1], gold$Settle, econIndicator),
+                                      formLast = TRUE)
+
+colnames(data_merged ) <- 
+  c(names(commodityChoices[commodityChoices == input$commodity]), 
+    "Gold", 
+    names(econIndicatorChoices[econIndicatorChoices == input$econIndicator]))
+
+data_merged$ratio <- (data_merged[,1])/data_merged$Gold
+
+ratio_indicator  <- merge(data_merged$ratio, data_merged[,3])
+colnames(ratio_indicator) <- c("ratio","indicator")
+
+return(ratio_indicator)
+})
+
+```
+
+
+Row
+-------------------------------------
+    
+### Chart 1
+    
+```{r}
+dygraphOutput("ratio_indicator")
+
+output$ratio_indicator <- renderDygraph({
+  dygraph(ratio_indicator()) %>% 
+  # Add the rollPeriod for smoothing.
+  dyRoller(rollPeriod = 3) %>% 
+  # Create two independent axes.
+  dyAxis("y", label = "USD") %>%
+  dyAxis("y2", label = "Percent (%)", independentTicks = TRUE) %>%
+  # Assign each time series to an axis.
+  dySeries("ratio", axis = 'y', 
+           label = paste(names(commodityChoices[commodityChoices == input$commodity]), 
+                         "/Gold (LHS)", sep = "")) %>% 
+  dySeries("indicator", axis = 'y2', 
+           label = paste(names(econIndicatorChoices[econIndicatorChoices == input$econIndicator]), 
+                         "(RHS)", sep = ""))
+})
+
+```
+
+Row
+-------------------------
+
+### Chart 2
+
+```{r}
+
+```
+
