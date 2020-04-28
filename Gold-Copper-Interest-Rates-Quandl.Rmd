@@ -16,7 +16,7 @@ library(lubridate)
 library(dygraphs)
 ```
 
-Today, we will continue getting familiar with data from Quandl, but will also devote more time to expanding our dygraphs toolkit. We will be building up a data visualization in discrete pieces, which isn't very efficient, but will make things easier when we move this project into production as a Shiny app. From a substantive perspective, we will examine the relationship between the price ratio of copper-gold and 10-year Treasure yields.  
+Today, we will continue getting familiar with data from Quandl, but will also devote more time to expanding our dygraphs toolkit. We will be building up a data visualization in discrete pieces, which isn't very efficient, but will make things easier when we move this project into production as a Shiny app. From a substantive perspective, we will examine the relationship between the price ratio of copper-gold and 10-year Treasure yields.   
 
 Why do we care about the copper-gold price ratio and Treasury yields? First, both Jeff Gundlach (in [this webcast](http://doubleline.com/latest-webcasts/)) and [Adam Robinson](http://robinsonglobalstrategies.com/) say so, and that's probably good enough. The theory goes like this:
 
@@ -24,7 +24,7 @@ Copper is a useful industrial metal whose price tends to rise when the global ec
 
 The yield on 10-year Treasury Notes also tends to rise during economic expansion because investors' inflation expectations are on the rise. When investors expect inflation to increase, they anticipate an uptick in interest rates (for those of you who are too young to remember what an interest rate is, take a look at rates in the mid-1980s) and start to seek higher yields today.  That can drive down Treasury prices and increase yields.
 
-Thus, we should observe a positive relationship between the copper-gold price ratio and 10-year yields. Both should be rising and falling based on the state of the world economy. There's nothing too crazy here, but it's an interesting relationship to think about and investigate. That's what we'll do today!
+Thus, we should observe a positive relationship between the copper-gold price ratio and 10-year yields. Both should be rising and falling based on the state of the world economy. There's nothing too crazy here, but it's an interesting relationship to think about and investigate. That's what we'll do today.
 
 First, let's import the relevant time series data from Quandl. We will specify `type = "xts"` in order to create xts objects and `collapse = "daily"` because we want daily prices. Note in particular our data sources: CME for copper and gold, and FRED for the 10-year yield. But, we just need the Quandl codes and to be careful about consistent start/end dates for each data set. It's a liberating feeling to know before starting a project that we'll be able to find whatever data we need in one source. 
 
@@ -36,15 +36,22 @@ library(dplyr)
 library(xts)
 library(lubridate)
 library(dygraphs)
+library(purrr)
 
-copper <- Quandl("CHRIS/CME_HG1", type = "xts", collapse = "daily",  
-                    start_date = "2012-01-01", end_date = "2017-02-28")
+copper <- Quandl("ODA/PIORECR_USD", type = "xts", collapse = "monthly",  
+                    start_date = "2012-01-01", end_date = "2018-02-01")
 
 gold <- Quandl("CHRIS/CME_GC1", type = "xts", collapse = "daily",  
-                    start_date = "2012-01-01", end_date = "2017-02-28")
+                    start_date = "2012-01-01", end_date = "2018-02-01")
 
 ten_year <- Quandl("FRED/DGS10", type = "xts", collapse = "daily",  
-                    start_date = "2012-01-01", end_date = "2017-02-28")
+                    start_date = "2012-01-01", end_date = "2018-02-01")
+
+datasets <- c("CHRIS/CME_HG1.1", "CHRIS/CME_GC1.1", "FRED/DGS10.1")
+Quandl.api_key("d9EidiiDWoFESfdk5nPy")
+
+ 
+
 ```
 
 Now we want to combine these into one xts object, which normally would be an easy invocation of `merge.xts`, but there's a slight wrinkle. After creating one xts object, we know we need to calculate a ratio of copper/gold. That means that the presence of NAs will be a problem (I found this out the old-fashioned way, by running code that threw an error). Let's take care of that by prepending the `na.locf()` function to our merge operation. That function will replace all NAs with the previous day's value. Why might one of our time series have an NA when another doesn't? Maybe one of the instruments has a trading holiday, or FRED publishes data for days that are general market holidays. 
@@ -55,10 +62,10 @@ No matter which approach is taken, the most crucial thing is to explain and make
 
 
 ```{r}
-# We're going to merge our 3 xts objects into on xts objects. This would normally be
+# We're going to merge our 3 xts objects into one xts objects. This would normally be
 # very simple with merge.xts but we want to eliminat NAs with na.locf().
 
-copper_gold_tenYear_merged <- na.locf(merge.xts(copper$Settle, gold$Settle, ten_year),
+copper_gold_tenYear_merged <- na.locf(merge.xts(copper, gold$Settle, ten_year),
                                       formLast = TRUE)
 
 colnames(copper_gold_tenYear_merged ) <- c("Copper", "Gold", "TenYear")
@@ -70,12 +77,14 @@ Now we create a new column to store the ratio of copper gold prices.
 # Create the ratio of prices. I multiply copper by 100 to synch with the scale used by 
 # Gundlach in his presentation.
 copper_gold_tenYear_merged$ratio <- (copper_gold_tenYear_merged$Copper*100)/copper_gold_tenYear_merged$Gold
+
 ```
 
 We have an xts object that holds four time series, but I want to chart only the copper-gold price ratio and 10-year yields. This next step is not necessary but to be extra clear, I am going to create a new xts object to hold only those two time series.
 
 ```{r}
 tenYear_ratio  <- merge(copper_gold_tenYear_merged$ratio, copper_gold_tenYear_merged$TenYear)
+
 ```
 
 We use dygraphs to chart that one xts object, and call `dySeries()` for each of the columns to be included.
@@ -103,7 +112,8 @@ dygraph(tenYear_ratio) %>%
   dySeries("ratio", axis = 'y', label = "Copper/Gold (LHS)") %>% 
   dySeries("TenYear", axis = 'y2', label = "10-Year % Yield (RHS)")
 
-```   
+```  
+
 
 Alright, that chart looks better now (though I encourage you to play with different settings for rollPeriod to compare different smoothness levels) and, incidentally, seems supportive of our hypothesized relationship between copper-gold and yields. There did seem to be a few periods of divergence, which would be a ripe area for further research. But we will move on to calculate and chart the rolling correlation between these two time series. 
 

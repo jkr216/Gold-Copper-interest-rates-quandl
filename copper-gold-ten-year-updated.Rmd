@@ -1,0 +1,201 @@
+---
+title: "Gold Copper Yields: updated"
+output: html_notebook
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+
+library(tidyquant)
+library(tidyverse)
+library(timetk)
+library(highcharter)
+library(Quandl)
+
+Quandl.api_key("d9EidiiDWoFESfdk5nPy")
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+Today, we'll revisit the relationship between the copper/gold price ratio and 10-year Treasury yields. Inflation and interest rates have been all the rage recently, along with the VIX (which we discussed several days ago [here](http://www.reproduciblefinance.com/2018/02/12/vix-and-realized-volatility-updating-our-previous-work/)), and it feels like a good time to refresh on this concept.
+
+Why do we care about the copper-gold price ratio and Treasury yields? First, both Jeff Gundlach (https://www.cnbc.com/2017/10/27/one-of-jeffrey-gundlachs-favorite-indicators-is-pointing-to-solid-global-growth.html) and [Adam Robinson](http://robinsonglobalstrategies.com/) say so, and that's probably good enough. For good measure, the theory goes like this:
+
+Copper is a useful industrial metal whose price tends to rise when the global economy expands. As firms produce more goods that require copper as an input, the increased demand for copper drives the price higher. Gold, on the other hand, is a somewhat less useful metal whose prices tends to rise when investors are fearful about a contracting global economy. Gold is a safe-haven investment, and a rising gold price signals either a contracting economy, investor fears of a contracting economy, or both. Gold prices tend to fall when the economy is humming along nicely. Thus, the copper-gold price ratio tends to be increasing when the economy is expanding.
+
+The yield on 10-year Treasury Notes also tends to rise during economic expansion because investors' inflation expectations are on the rise. When investors expect inflation to increase, they anticipate an uptick in interest rates (for those of you who are too young to remember what an interest rate is, take a look at rates in the mid-1980s) and start to seek higher yields today.  That can drive down Treasury prices and increase yields.
+
+Thus, we should observe a positive relationship between the copper-gold price ratio and 10-year yields. Both should be rising and falling based on the state of the world economy. There's nothing too crazy here, but it's an interesting relationship to think about and investigate. That's what we'll do today.
+
+First, let's import the time series data from Quandl. Note in particular our data sources: CME for copper and gold, and FRED for 10-year rates. But, we just need the Quandl codes, which are:
+
+copper = CHRIS/CME_HG1
+gold   = CHRIS/CME_GC1
+10-year = FRED/DGS10.1
+
+Instead of using the `Quandl()` function, we are going to use the `tq_get()` function from `tidyquant` and will specify the source with 
+`get = "quandl"`.  Have a quick peek at the result because we have some wrangling ahead of us.
+
+```{r}
+datasets <- c("CHRIS/CME_HG1", "CHRIS/CME_GC1", "FRED/DGS10.1")
+
+commodities <- 
+  datasets %>%
+    tq_get(get          = "quandl",
+           from         = "2000-01-01",
+           collapse     = "daily") 
+
+head(commodities)
+```
+
+Note that the data is long formatted in that there is one column for the `symbol` variable but it's pusehd wide because gold and copper have an open, high, low, last, change, settle and volume column, and 10-years have a value column. 
+
+Let's keep just the settle price for gold and copper, and just the value column for 10-years, along with date and symbol. We will call `select(symbol, date, settle, value)`.
+
+```{r}
+commodities  %>% 
+  select(symbol, date, settle, value)
+```
+
+Looking better, but it bothers me that we have two columns, `settle` and `value` for what should be one column called `data`. To solve this, let's create one new column to hold the settle price of gold and copper, and the value of of the ten-year. The logic here is to create a new column and populate with the number from `settle` when there is an observation and with the number from `value` when there is an observation. We will code that logic with
+`mutate(data = case_when(value > 0 ~ value, settle > 0 ~ settle))`. That `case_when()` is saying to set the news `data` column equal to the observation from `value` when `value` is greater than 0 and equal to `settle` when `settle` is greater than 0. 
+
+```{r}
+commodities %>%  
+  select(symbol, date, settle, value) %>% 
+  mutate(data = case_when(value > 0 ~ value,
+                          settle > 0 ~ settle)) %>% 
+  select(symbol, date, data) %>% 
+  head()
+```
+
+I would like to clean up the `symbol` column and give it better names instead of Quandl codes. I also want to shift this data to wide format so I can more easily create a ratio column.  This means we can first `spread()` the data back to wide format, then change the column names. We call 
+`spread(symbol, data)` and then `colnames<-(c("date","gold", "copper", "ten_year"))`.
+
+```{r}
+commodities %>% 
+  select(symbol, date, settle, value) %>% 
+  mutate(data = case_when(value > 0 ~ value,
+                          settle > 0 ~ settle)) %>% 
+  select(symbol, date, data) %>% 
+  spread(symbol, data) %>% 
+  `colnames<-`(c("date","gold", "copper", "ten_year")) %>% 
+  head()
+```
+
+OK, that was quite a bit of work, and it was just wrangling our data into a shape where we can look at it, with nice column names. We even made it non-tidy, violating the rules of the tidyverse, but we'll fix that later. For now, let's add a column to hold the copper/gold ratio with 
+`mutate(cpr_gold_ratio = (copper*100)/gold)`.
+
+```{r}
+commodities_df <-
+  commodities %>% 
+  select(symbol, date, settle, value) %>% 
+  mutate(data = case_when(value > 0 ~ value,
+                          settle > 0 ~ settle)) %>% 
+  select(symbol, date, data) %>% 
+  spread(symbol, data) %>% 
+  `colnames<-`(c("date","gold", "copper", "ten_year")) %>% 
+  mutate(cpr_gold_ratio = (copper*100)/gold) 
+
+head(commodities_df)
+```
+
+We now have a new object called `commodities_df` to hold our data and have a decision to make about how to visualize this data. We could put it back to long format and go with `ggplot()` or leave it in wide format, change to `xts` and use highcharter. Let's go the highcharter route. We first convert to `xts` with `tk_xts(date_var = date)`.
+
+```{r}
+commodities_xts <- 
+  commodities_df %>% 
+  tk_xts(date_var = date)
+```
+
+Our `commodities_df` object is now an `xts` object called `commodities_xts` and is ready to be passed to highcharter. Let's chart the copper/gold ratio on the left hand y-axis and 10-year rates on the right hand axis.
+
+
+```{r}
+  highchart(type = "stock") %>%
+  hc_subtitle(text = "Ratio") %>%
+  hc_subtitle(text = "Copper-Gold and 10-year yields") %>%
+  hc_tooltip(crosshairs = TRUE, backgroundColor = c("#F8F8FF"),
+             shared = TRUE, borderWidth = 1) %>%
+  hc_yAxis_multiples(
+    list(
+      title = list(text = "copper-gold ratio"),
+      align = "left",
+      labels = list(format = "{value}$"),
+      showFirstLabel = FALSE,
+      showLastLabel = FALSE, opposite = FALSE),
+    list(
+      title = list(text = "10-year rates"),
+      align = "right",
+      labels = list(format = "{value}%"),
+      showFirstLabel = FALSE, opposite = TRUE,
+      showLastLabel = FALSE)) %>%
+  hc_add_series(commodities_xts$cpr_gold_ratio, name = "copper-gold ratio", yAxis = 0) %>% 
+  hc_add_series(commodities_xts$ten_year, name = "10-year", type = "spline", yAxis = 1) %>% 
+  hc_exporting(enabled = TRUE) %>% 
+  hc_navigator(enabled = TRUE) %>% 
+  hc_scrollbar(enabled = FALSE) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+
+It looks like the relationship has been postivie and strong for most of the period 2000-Present and if this were our last snapshot, we might not notice much. Have a look, though, when we isolate just 2017 and 2018. 
+
+```{r}
+commodities_2017_18 <- 
+  commodities_df %>% 
+  filter(date >= "2017-01-01") %>% 
+  tk_xts(date_var = date)
+
+highchart(type = "stock") %>%
+  hc_subtitle(text = "Ratio") %>%
+  hc_subtitle(text = "Copper-Gold and 10-year yields") %>%
+  hc_tooltip(crosshairs = TRUE, backgroundColor = c("#F8F8FF"),
+             shared = TRUE, borderWidth = 1) %>%
+  hc_yAxis_multiples(
+    list(
+      title = list(text = "copper-gold ratio"),
+      align = "left",
+      labels = list(format = "{value}$"),
+      showFirstLabel = FALSE,
+      showLastLabel = FALSE, opposite = FALSE),
+    list(
+      title = list(text = "10-year rates"),
+      align = "right",
+      labels = list(format = "{value}%"),
+      showFirstLabel = FALSE, opposite = TRUE,
+      showLastLabel = FALSE)) %>%
+  hc_add_series(commodities_2017_18$cpr_gold_ratio, name = "copper-gold ratio", yAxis = 0) %>% 
+  hc_add_series(commodities_2017_18$ten_year, name = "10-year", type = "spline", yAxis = 1) %>% 
+  hc_exporting(enabled = TRUE) %>% 
+  hc_navigator(enabled = TRUE) %>% 
+  hc_scrollbar(enabled = FALSE) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+Now we see an interesting development at the beginning of 2018 (or maybe September 2017).  10-year rates started to increase rapidly and are now above 2.9%, whilst the copper/gold ratio remained flattish/declined a bit. 
+
+For fun, some possible explanations: 
+
+1) 10-years are anticipating inflation but it hasn't arrived yet.
+2) Copper/gold isn't a good leading or present indicator of economic growth/inflation (Gundlach is wrong! I wouldn't bet on that notion long term).
+3) One of these indicators is mispriced.
+4) A [weaker dollar](http://www.businessinsider.com/gold-price-something-unusual-us-happening-2018-2) is keeping gold prices artificially high, depresssing the copper/gold ratio, and that should start to change.
+5) The bond market isn't worrying about inflation qua inflation, it's worrying about central bank tightening, which seems to be coming our way regardless of the inflationary environment. 
+
+Before we close, let's head to `ggplot()` and use `facet_wrap(~asset, scales = "free")` to create a separate chart for each of our assets. We will go back to the `commodities_df` object, and convert to long-format with `gather(asset, price, -date)`. Then make the call to `ggplot()`.
+
+```{r}
+commodities_df %>% 
+  gather(asset, price, -date) %>% 
+  ggplot(aes(x = date, y = price, color = asset)) +
+  geom_line() + 
+  facet_wrap(~asset, scales = "free")
+```  
+
+We can see that 10-year rates are still quite low, gold has come off its peak and Dr. Copper, well, it's been a choppy ride.
+
+It should be an interesting 2018, indeed! Thanks for reading and see you next time. 
+
